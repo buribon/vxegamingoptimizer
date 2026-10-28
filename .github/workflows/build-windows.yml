@@ -1,0 +1,57 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract source archive
+        shell: pwsh
+        run: |
+          $archive = Get-ChildItem -Path . -Filter 'NEXUSGamingOptimizer-source.zip' -Recurse | Select-Object -First 1
+          if (-not $archive) {
+            throw 'Missing NEXUSGamingOptimizer-source.zip. Add the source archive to the repository root and rerun this workflow.'
+          }
+          Expand-Archive -Path $archive.FullName -DestinationPath "$env:RUNNER_TEMP\nexus-src" -Force
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Test catalog
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'nexus-src'
+          $project = Get-ChildItem -Path $root -Filter 'NEXUSGamingOptimizer.Tests.csproj' -Recurse | Select-Object -First 1
+          if ($project) {
+            dotnet run --project $project.FullName
+          } else {
+            Write-Host 'No standalone test project found; continuing to publish.'
+          }
+      - name: Publish self-contained EXE
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'nexus-src'
+          $project = Get-ChildItem -Path $root -Filter 'NEXUSGamingOptimizer.csproj' -Recurse | Select-Object -First 1
+          if (-not $project) { throw 'NEXUSGamingOptimizer.csproj not found in source archive.' }
+          dotnet publish $project.FullName -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o "$env:RUNNER_TEMP\nexus-publish"
+          if (-not (Test-Path "$env:RUNNER_TEMP\nexus-publish\NEXUSGamingOptimizer.exe")) {
+            throw 'Publish did not produce NEXUSGamingOptimizer.exe.'
+          }
+      - name: Package EXE
+        shell: pwsh
+        run: |
+          $publish = Join-Path $env:RUNNER_TEMP 'nexus-publish'
+          Compress-Archive -Path "$publish\*" -DestinationPath "$env:GITHUB_WORKSPACE\NEXUSGamingOptimizer-win-x64.zip" -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NEXUSGamingOptimizer-win-x64
+          path: NEXUSGamingOptimizer-win-x64.zip
+          if-no-files-found: error
