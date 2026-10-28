@@ -21,6 +21,17 @@ jobs:
             throw 'Missing NEXUSGamingOptimizer-source*.zip. Upload the source archive to the repository and rerun this workflow.'
           }
           Expand-Archive -Path $archive.FullName -DestinationPath "$env:RUNNER_TEMP\nexus-src" -Force
+      - name: Patch missing framework imports
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'nexus-src'
+          $systemFile = Get-ChildItem -Path $root -Filter 'SystemServices.cs' -Recurse | Select-Object -First 1
+          $windowFile = Get-ChildItem -Path $root -Filter 'MainWindow.xaml.cs' -Recurse | Select-Object -First 1
+          if (-not $systemFile -or -not $windowFile) { throw 'Expected source files were not found.' }
+          $text = Get-Content -Raw $systemFile.FullName
+          if ($text -notmatch 'using System\.IO;') { Set-Content -Path $systemFile.FullName -Value ("using System.IO;`r`n" + $text) -Encoding utf8 }
+          $text = Get-Content -Raw $windowFile.FullName
+          if ($text -notmatch 'using System\.Net\.NetworkInformation;') { Set-Content -Path $windowFile.FullName -Value ("using System.Net.NetworkInformation;`r`n" + $text) -Encoding utf8 }
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
