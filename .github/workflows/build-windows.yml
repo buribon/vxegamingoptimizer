@@ -16,9 +16,9 @@ jobs:
       - name: Extract source archive
         shell: pwsh
         run: |
-          $archive = Get-ChildItem -Path . -Filter 'NEXUSGamingOptimizer-source.zip' -Recurse | Select-Object -First 1
+          $archive = Get-ChildItem -Path . -Filter 'NEXUSGamingOptimizer-source*.zip' -Recurse | Select-Object -First 1
           if (-not $archive) {
-            throw 'Missing NEXUSGamingOptimizer-source.zip. Add the source archive to the repository root and rerun this workflow.'
+            throw 'Missing NEXUSGamingOptimizer-source*.zip. Upload the source archive to the repository and rerun this workflow.'
           }
           Expand-Archive -Path $archive.FullName -DestinationPath "$env:RUNNER_TEMP\nexus-src" -Force
       - name: Setup .NET
