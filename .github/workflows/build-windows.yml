@@ -17,22 +17,23 @@ jobs:
         shell: pwsh
         run: |
           $archive = Get-ChildItem -Path . -Filter 'NEXUSGamingOptimizer-source*.zip' -Recurse | Select-Object -First 1
-          if (-not $archive) { throw 'Missing NEXUSGamingOptimizer-source*.zip. Upload the source archive to the repository and rerun this workflow.' }
+          if (-not $archive) { throw 'Missing NEXUSGamingOptimizer-source*.zip.' }
           Expand-Archive -Path $archive.FullName -DestinationPath "$env:RUNNER_TEMP\nexus-src" -Force
-      - name: Patch UI layout
+      - name: Fix card content and add per-card review action
         shell: pwsh
         run: |
           $root = Join-Path $env:RUNNER_TEMP 'nexus-src'
-          $windowFile = Get-ChildItem -Path $root -Filter 'MainWindow.xaml.cs' -Recurse | Select-Object -First 1
-          if (-not $windowFile) { throw 'MainWindow.xaml.cs was not found.' }
-          $text = Get-Content -Raw $windowFile.FullName
-          $old = @'
+          $f = Get-ChildItem -Path $root -Filter 'MainWindow.xaml.cs' -Recurse | Select-Object -First 1
+          if (-not $f) { throw 'MainWindow.xaml.cs not found.' }
+          $s = Get-Content -Raw $f.FullName
+          $s = $s.Replace('JsonSerializer.Deserialize<List<TweakCard>>(File.ReadAllText(p)) ?? new();', 'JsonSerializer.Deserialize<List<TweakCard>>(File.ReadAllText(p), new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();')
+          $oldHeader = @'
           var header=new DockPanel();
                   var status=new TextBlock { Text=$"{c.Risk.ToUpperInvariant()}  •  {c.Status}", Foreground=c.Risk=="Advanced"?Brushes.Orange:(Brush)FindResource("Accent"), FontSize=11, TextWrapping=TextWrapping.Wrap };
                   DockPanel.SetDock(status,Dock.Right); header.Children.Add(status);
                   header.Children.Add(new TextBlock{Text=$"{c.Id}  {c.Title}",FontSize=17,FontWeight=FontWeights.SemiBold,TextWrapping=TextWrapping.Wrap});
           '@
-          $new = @'
+          $newHeader = @'
           var header=new Grid();
                   header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                   header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -41,13 +42,26 @@ jobs:
                   var status=new TextBlock { Text=$"{c.Risk.ToUpperInvariant()}  •  {c.Status}", Foreground=c.Risk=="Advanced"?Brushes.Orange:(Brush)FindResource("Accent"), FontSize=11, TextWrapping=TextWrapping.Wrap, MaxWidth=260, VerticalAlignment=VerticalAlignment.Top };
                   Grid.SetColumn(status,1); header.Children.Add(status);
           '@
-          if ($text.Contains($old)) {
-            $text = $text.Replace($old,$new)
-            Set-Content -Path $windowFile.FullName -Value $text -Encoding utf8
-            Write-Host 'Patched card header to prevent text being squeezed off-screen.'
-          } else {
-            Write-Host 'Card layout patch pattern not found; source may already be patched.'
+          $s = $s.Replace($oldHeader.Trim(), $newHeader.Trim())
+          $s = $s.Replace('if(row.Children.Count>0) stack.Children.Add(row);', 'row.Children.Add(MakeButton("Details / How to apply",()=>ReviewCard(c))); stack.Children.Add(row);')
+          if ($s -notmatch 'private void ReviewCard\(') {
+            $method = @'
+          private void ReviewCard(TweakCard c)
+              {
+                  var message = $"{c.Id} — {c.Title}\n\nCategory: {c.Category}\nRisk: {c.Risk}\nSupport: {c.Status}\n\nWhat it does:\n{c.Description}\n\nPurpose:\n{c.Purpose}\n\nApply guidance:\n";
+                  if (c.Status.Contains("Guided", StringComparison.OrdinalIgnoreCase) || c.Status.Contains("detection", StringComparison.OrdinalIgnoreCase) || c.Status.Contains("information", StringComparison.OrdinalIgnoreCase))
+                      message += "This item is guidance-only in this build; there is no verified automatic switch for it. Use the relevant Windows, GPU-driver, or game settings manually, change one setting at a time, and record the original value so you can undo it.";
+                  else
+                      message += "Use only the dedicated action button shown on this card if one is available. Confirm prompts carefully and use Restore Center for supported rollback.";
+                  MessageBox.Show(message, "NEXUS — Tweak details", MessageBoxButton.OK, MessageBoxImage.Information);
+              }
+
+          '@
+            $s = $s.Replace('    private Button MakeButton(', '    ' + $method + '    private Button MakeButton(')
           }
+          Set-Content -Path $f.FullName -Value $s -Encoding utf8
+          if ($s -notmatch 'PropertyNameCaseInsensitive = true' -or $s -notmatch 'Details / How to apply' -or $s -notmatch 'private void ReviewCard\(') { throw 'Card UI patch validation failed.' }
+          Write-Host 'Patched case-insensitive catalog loading, readable card header, and per-card details/action.'
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
@@ -79,10 +93,10 @@ jobs:
         run: |
           $root = Join-Path $env:RUNNER_TEMP 'nexus-src'
           $project = Get-ChildItem -Path $root -Filter 'NEXUSGamingOptimizer.csproj' -Recurse | Select-Object -First 1
-          if (-not $project) { throw 'NEXUSGamingOptimizer.csproj not found in source archive.' }
+          if (-not $project) { throw 'NEXUSGamingOptimizer.csproj not found.' }
           dotnet publish $project.FullName -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o "$env:RUNNER_TEMP\nexus-publish"
           if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed.' }
-          if (-not (Test-Path "$env:RUNNER_TEMP\nexus-publish\NEXUSGamingOptimizer.exe")) { throw 'Publish did not produce NEXUSGamingOptimizer.exe.' }
+          if (-not (Test-Path "$env:RUNNER_TEMP\nexus-publish\NEXUSGamingOptimizer.exe")) { throw 'EXE missing after publish.' }
       - name: Package EXE
         shell: pwsh
         run: |
