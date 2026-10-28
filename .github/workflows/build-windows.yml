@@ -30,10 +30,12 @@ jobs:
         run: |
           $root = Join-Path $env:RUNNER_TEMP 'nexus-src'
           $project = Get-ChildItem -Path $root -Filter 'NEXUSGamingOptimizer.Tests.csproj' -Recurse | Select-Object -First 1
-          if ($project) {
-            dotnet run --project $project.FullName
+          $catalog = Get-ChildItem -Path $root -Filter 'OptimizationCatalog.json' -Recurse | Select-Object -First 1
+          if ($project -and $catalog) {
+            dotnet run --project $project.FullName -- $catalog.FullName
+            if ($LASTEXITCODE -ne 0) { throw 'Catalog validation failed.' }
           } else {
-            Write-Host 'No standalone test project found; continuing to publish.'
+            Write-Host 'Test project or catalog not found; continuing to publish.'
           }
       - name: Publish self-contained EXE
         shell: pwsh
@@ -42,6 +44,7 @@ jobs:
           $project = Get-ChildItem -Path $root -Filter 'NEXUSGamingOptimizer.csproj' -Recurse | Select-Object -First 1
           if (-not $project) { throw 'NEXUSGamingOptimizer.csproj not found in source archive.' }
           dotnet publish $project.FullName -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o "$env:RUNNER_TEMP\nexus-publish"
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed.' }
           if (-not (Test-Path "$env:RUNNER_TEMP\nexus-publish\NEXUSGamingOptimizer.exe")) {
             throw 'Publish did not produce NEXUSGamingOptimizer.exe.'
           }
